@@ -291,6 +291,7 @@ func (chain *BlockChain) VerifyBlockIntegrity(block *Block) bool {
 	return exists
 }
 
+
 // UpdateTrustScore updates a node's trust score for Byzantine fault tolerance
 func (chain *BlockChain) UpdateTrustScore(nodeID string, success bool) {
 	chain.mutex.Lock()
