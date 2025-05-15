@@ -35,26 +35,36 @@ func (tx *Transaction) SetID() {
 }
 
 // CoinbaseTx creates a new coinbase transaction
-func CoinbaseTx(to, data string) *Transaction {
-	if data == "" {
-		data = fmt.Sprintf("Coinbase transaction to %s", to)
-	}
+func CoinbaseTx(to string, data string, amount int) *Transaction {
+    if data == "" {
+        data = fmt.Sprintf("Reward %d to %s", amount, to)
+    }
 
-	txIn := TxInput{[]byte{}, -1, data, nil}
-	txOut := TxOutput{100, to, nil}
+    txIn := TxInput{
+        ID:        []byte{},
+        OutIndex:  -1,
+        Signature: data,
+        StateProof: nil,
+    }
 
-	tx := Transaction{
-		nil, 
-		[]TxInput{txIn}, 
-		[]TxOutput{txOut},
-		time.Now().Unix(),
-		nil,
-		0,
-		nil,
-	}
-	tx.SetID()
+    txOut := TxOutput{
+        Value:    amount, 
+        PubKey:   to,
+        Metadata: nil,
+    }
 
-	return &tx
+    tx := Transaction{
+        ID:         nil,
+        Inputs:     []TxInput{txIn},
+        Outputs:    []TxOutput{txOut},
+        Timestamp:  time.Now().Unix(),
+        Signature:  nil,
+        LockTime:   0,
+        StateProof: nil,
+    }
+    tx.SetID()
+
+    return &tx
 }
 
 // IsCoinbase checks if this is a coinbase transaction

@@ -175,6 +175,22 @@ func (cli *CommandLine) setTrust(nodeID string, score float64) {
     fmt.Printf("Trust score for %s set to %.2f\n", nodeID, score)
 }
 
+func (cli *CommandLine) addFunds(address string, amount int) {
+    if !wallet.ValidateAddress(address) {
+        log.Panic("Address is not valid")
+    }
+    if amount <= 0 {
+        log.Panic("Amount must be positive")
+    }
+
+    chain := blockchain.ContinueBlockChain("")
+    defer chain.Database.Close()
+    
+    // Create transaction with explicit amount
+    cbTx := blockchain.CoinbaseTx(address, fmt.Sprintf("Reward %d", amount), amount)
+    chain.AddBlock([]*blockchain.Transaction{cbTx})
+    fmt.Printf("Added %d coins to %s\n", amount, address)
+}
 
 func (cli *CommandLine) Run() {
     // Handle global flags
@@ -280,6 +296,13 @@ func (cli *CommandLine) Run() {
 		Handle(err)
 		cli.setTrust(*node, *score)
 		runtime.Goexit()
+	case "addfunds":
+		addFundsCmd := flag.NewFlagSet("addfunds", flag.ExitOnError)
+		addFundsAddress := addFundsCmd.String("address", "", "Address to fund")
+		addFundsAmount := addFundsCmd.Int("amount", 0, "Amount to add")
+		err := addFundsCmd.Parse(os.Args[2:])
+		Handle(err)
+		cli.addFunds(*addFundsAddress, *addFundsAmount)
 	
 	default:
 		cli.printUsage()

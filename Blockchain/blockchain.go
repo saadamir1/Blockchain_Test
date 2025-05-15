@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 	"bytes"
+	"math"
 
 	"github.com/dgraph-io/badger"
 )
@@ -48,7 +49,7 @@ func InitBlockChain(address string) *BlockChain {
 	Handle(err)
 	
 	// Create genesis block
-	cbtx := CoinbaseTx(address, genesisData)
+	cbtx := CoinbaseTx(address, genesisData, 100)
 	genesis := Genesis(cbtx)
 	
 	// Store genesis block in database
