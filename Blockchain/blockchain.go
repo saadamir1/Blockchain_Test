@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"bytes"
 
 	"github.com/dgraph-io/badger"
 )
@@ -280,36 +281,50 @@ Work:
 
 // VerifyBlockIntegrity performs advanced verification of a block
 func (chain *BlockChain) VerifyBlockIntegrity(block *Block) bool {
-	// Verify proof of work
-	pow := NewProof(block)
-	if !pow.Validate() {
-		return false
-	}
-	
-	// Verify block exists in AMF
-	_, exists := chain.AMF.GenerateMerkleProof(block.Serialize())
-	return exists
+    // 1. Always verify proof of work
+    pow := NewProof(block)
+    if !pow.Validate() {
+        fmt.Println("Block", hex.EncodeToString(block.Hash), "failed PoW verification")
+        return false
+    }
+
+    // 2. For genesis block, skip AMF verification
+    if len(block.PrevHash) == 0 {
+        return true
+    }
+
+    // 3. For other blocks, verify transaction Merkle root matches
+    calculatedRoot := block.HashTransactions()
+    if !bytes.Equal(calculatedRoot, block.TxTrie.Hash) {
+        fmt.Println("Merkle root mismatch for block", hex.EncodeToString(block.Hash))
+        return false
+    }
+
+    // 4. Verify block in AMF if AMF is initialized
+    if chain.AMF != nil {
+        _, exists := chain.AMF.GenerateMerkleProof(block.Hash)
+        if !exists {
+            fmt.Println("Block", hex.EncodeToString(block.Hash), "not found in AMF")
+            return false
+        }
+    }
+
+    return true
 }
 
 
 // UpdateTrustScore updates a node's trust score for Byzantine fault tolerance
+// Add to blockchain.go
 func (chain *BlockChain) UpdateTrustScore(nodeID string, success bool) {
-	chain.mutex.Lock()
-	defer chain.mutex.Unlock()
-	
-	currentScore, exists := chain.trustScores[nodeID]
-	if !exists {
-		currentScore = 0.5 // Default trust score
-	}
-	
-	// Adjust score based on node behavior
-	if success {
-		currentScore = min(currentScore + 0.1, 1.0)
-	} else {
-		currentScore = max(currentScore - 0.2, 0.0)
-	}
-	
-	chain.trustScores[nodeID] = currentScore
+    chain.mutex.Lock()
+    defer chain.mutex.Unlock()
+    
+    currentScore := chain.trustScores[nodeID]
+    if success {
+        chain.trustScores[nodeID] = math.Min(currentScore+0.1, 1.0)
+    } else {
+        chain.trustScores[nodeID] = math.Max(currentScore-0.2, 0.0)
+    }
 }
 
 // DBExists checks if the blockchain database exists
@@ -333,4 +348,25 @@ func max(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+var addressLocks = make(map[string]bool)
+var lockMutex sync.Mutex
+
+func (chain *BlockChain) LockAddress(address string) {
+    lockMutex.Lock()
+    defer lockMutex.Unlock()
+    addressLocks[address] = true
+}
+
+func (chain *BlockChain) UnlockAddress(address string) {
+    lockMutex.Lock()
+    defer lockMutex.Unlock()
+    delete(addressLocks, address)
+}
+
+func (chain *BlockChain) IsAddressLocked(address string) bool {
+    lockMutex.Lock()
+    defer lockMutex.Unlock()
+    return addressLocks[address]
 }

@@ -230,3 +230,11 @@ func (atm *AdaptiveTimeoutManager) CalculateTimeout() time.Duration {
 	
 	return adjustedTimeout
 }
+
+func (co *ConsistencyOrchestrator) SetConsistency(level ConsistencyLevel) {
+    co.mutex.Lock()
+    defer co.mutex.Unlock()
+    for node := range co.NodeConsistency {
+        co.NodeConsistency[node] = level
+    }
+}

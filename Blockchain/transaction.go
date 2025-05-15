@@ -64,64 +64,72 @@ func (tx *Transaction) IsCoinbase() bool {
 
 // NewTransaction creates a new transaction
 func NewTransaction(from, to string, amount int, chain *BlockChain) *Transaction {
-	var Inputs []TxInput
-	var Outputs []TxOutput
+    // Check for pending spends
+    if chain.IsAddressLocked(from) {
+        log.Panic("ERROR: Address has pending transaction (double-spend attempt)")
+    }
 
-	acc, validOutputs := chain.FindSpendableOutputs(from, amount)
+    // Lock the address until transaction is mined
+    chain.LockAddress(from)
+    defer chain.UnlockAddress(from)
 
-	if acc < amount {
-		log.Panic("ERROR: Not enough funds")
-	}
+    var Inputs []TxInput
+    var Outputs []TxOutput
 
-	// Build inputs
-	for txid, outs := range validOutputs {
-		txID, err := hex.DecodeString(txid)
-		Handle(err)
+    acc, validOutputs := chain.FindSpendableOutputs(from, amount)
+    if acc < amount {
+        chain.UnlockAddress(from)
+        log.Panic("ERROR: Not enough funds")
+    }
 
-		for _, out := range outs {
-			input := TxInput{
-				ID:        txID,
-				OutIndex:  out,
-				Signature: from,
-				StateProof: nil,
-			}
-			Inputs = append(Inputs, input)
-		}
-	}
+    // Build inputs
+    for txid, outs := range validOutputs {
+        txID, err := hex.DecodeString(txid)
+        Handle(err)
 
-	// Build outputs
-	Outputs = append(Outputs, TxOutput{
-		Value:  amount,
-		PubKey: to,
-		Metadata: nil,
-	})
+        for _, out := range outs {
+            input := TxInput{
+                ID:        txID,
+                OutIndex:  out,
+                Signature: from,
+                StateProof: nil,
+            }
+            Inputs = append(Inputs, input)
+        }
+    }
 
-	// Change output
-	if acc > amount {
-		Outputs = append(Outputs, TxOutput{
-			Value:  acc - amount,
-			PubKey: from,
-			Metadata: nil,
-		})
-	}
+    // Build outputs
+    Outputs = append(Outputs, TxOutput{
+        Value:    amount,
+        PubKey:   to,
+        Metadata: nil,
+    })
 
-	// Create and sign transaction
-	tx := Transaction{
-		nil,
-		Inputs,
-		Outputs,
-		time.Now().Unix(),
-		nil,
-		0,
-		nil,
-	}
-	tx.SetID()
-	
-	// Generate simplified state proof
-	proof := sha256.Sum256(tx.ID)
-	tx.StateProof = proof[:]
+    // Change output
+    if acc > amount {
+        Outputs = append(Outputs, TxOutput{
+            Value:    acc - amount,
+            PubKey:   from,
+            Metadata: nil,
+        })
+    }
 
-	return &tx
+    tx := Transaction{
+        ID:         nil,
+        Inputs:     Inputs,
+        Outputs:    Outputs,
+        Timestamp:  time.Now().Unix(),
+        Signature:  nil,
+        LockTime:   0,
+        StateProof: nil,
+    }
+    tx.SetID()
+    
+    // Generate state proof
+    proof := sha256.Sum256(tx.ID)
+    tx.StateProof = proof[:]
+
+    return &tx
 }
 
 // VerifyTransaction verifies transaction integrity

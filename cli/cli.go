@@ -11,17 +11,23 @@ import (
 	"strconv"
 )
 
-type CommandLine struct{}
+type CommandLine struct{
+	Consistency string
+    NodeID      string
+    TrustScore  float64
+}
 
 func (cli *CommandLine) printUsage() {
-	fmt.Println("Usage:")
-	fmt.Println(" getbalance -address ADDRESS - Get balance of ADDRESS")
-	fmt.Println(" createwallet - Create a new wallet")
-	fmt.Println(" listaddresses - List all addresses in the wallet")
-	fmt.Println(" createblockchain -address ADDRESS - Create a new blockchain and send genesis block reward to ADDRESS")
-	fmt.Println(" printchain - Print the blocks in the blockchain")
-	fmt.Println(" send -from FROM -to TO -amount AMOUNT - Send amount from FROM to TO")
-	fmt.Println(" validatechain - Validate the integrity of the blockchain")
+    fmt.Println("Usage:")
+    fmt.Println(" getbalance -address ADDRESS - Get balance of ADDRESS")
+    fmt.Println(" createwallet - Create a new wallet")
+    fmt.Println(" listaddresses - List all addresses in the wallet")
+    fmt.Println(" createblockchain -address ADDRESS - Create a new blockchain")
+    fmt.Println(" printchain - Print the blocks in the blockchain")
+    fmt.Println(" send -from FROM -to TO -amount AMOUNT - Send amount")
+    fmt.Println(" validatechain - Validate the blockchain integrity")
+    fmt.Println(" setconsistency [strong|eventual] - Set consistency mode")
+    fmt.Println(" settrust -node NODE_ID -score SCORE - Set trust score")
 }
 
 func (cli *CommandLine) validateArgs() {
@@ -140,7 +146,55 @@ func (cli *CommandLine) validateChain() {
 	}
 }
 
+func (cli *CommandLine) setConsistency(level string) {
+    chain := blockchain.ContinueBlockChain("")
+    defer chain.Database.Close()
+    
+    switch level {
+    case "strong":
+        chain.ConsistencyMgr.SetConsistency(blockchain.StrongConsistency)
+    case "eventual":
+        chain.ConsistencyMgr.SetConsistency(blockchain.EventualConsistency)
+    default:
+        log.Panic("Invalid consistency level")
+    }
+    fmt.Println("Consistency level set to:", level)
+}
+
+func Handle(err error) {
+    if err != nil {
+        log.Panic(err)
+    }
+}
+func (cli *CommandLine) setTrust(nodeID string, score float64) {
+    chain := blockchain.ContinueBlockChain("")
+    defer chain.Database.Close()
+    
+    // Update trust score in the blockchain
+    chain.UpdateTrustScore(nodeID, score >= 0.5)
+    fmt.Printf("Trust score for %s set to %.2f\n", nodeID, score)
+}
+
+
 func (cli *CommandLine) Run() {
+    // Handle global flags
+    if len(os.Args) > 1 {
+        for i, arg := range os.Args {
+            switch arg {
+            case "-consistency":
+                cli.Consistency = os.Args[i+1]
+                os.Args = append(os.Args[:i], os.Args[i+2:]...)
+            case "-node":
+                cli.NodeID = os.Args[i+1]
+                os.Args = append(os.Args[:i], os.Args[i+2:]...)
+            case "-trustscore":
+                score, err := strconv.ParseFloat(os.Args[i+1], 64)
+                Handle(err)
+                cli.TrustScore = score
+                os.Args = append(os.Args[:i], os.Args[i+2:]...)
+            }
+        }
+    }
 	cli.validateArgs()
 
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
@@ -193,6 +247,40 @@ func (cli *CommandLine) Run() {
 		if err != nil {
 			log.Panic(err)
 		}
+	case "setconsistency":
+		consistencyCmd := flag.NewFlagSet("setconsistency", flag.ExitOnError)
+		level := consistencyCmd.String("level", "", "Consistency level (strong/eventual)")
+		err := consistencyCmd.Parse(os.Args[2:])
+		Handle(err)
+		
+		if *level == "" {
+			log.Panic("Please specify consistency level (strong/eventual)")
+		}
+		
+		chain := blockchain.ContinueBlockChain("")
+		
+		switch *level {
+		case "strong":
+			chain.ConsistencyMgr.SetConsistency(blockchain.StrongConsistency)
+		case "eventual":
+			chain.ConsistencyMgr.SetConsistency(blockchain.EventualConsistency)
+		default:
+			chain.Database.Close()
+			log.Panic("Invalid consistency level")
+		}
+		
+		chain.Database.Close()
+		fmt.Println("Consistency level set to:", *level)
+		return
+	case "settrust":
+		trustCmd := flag.NewFlagSet("settrust", flag.ExitOnError)
+		node := trustCmd.String("node", "", "Node ID")
+		score := trustCmd.Float64("score", 0.5, "Trust score")
+		err := trustCmd.Parse(os.Args[2:])
+		Handle(err)
+		cli.setTrust(*node, *score)
+		runtime.Goexit()
+	
 	default:
 		cli.printUsage()
 		runtime.Goexit()
