@@ -31,14 +31,6 @@ func (cli *CommandLine) printUsage() {
     fmt.Println(" settrust -node NODE_ID -score SCORE - Set trust score")
 }
 
-func (cli *CommandLine) validateArgs() {
-	if len(os.Args) < 2 {
-		cli.interactiveMode()
-		//cli.printUsage()
-		runtime.Goexit()
-	}
-}
-
 func (cli *CommandLine) printChain() {
 	chain := blockchain.ContinueBlockChain("")
 	defer chain.Database.Close()
@@ -275,7 +267,12 @@ func (cli *CommandLine) Run() {
             }
         }
     }
-	cli.validateArgs()
+	
+	// If no commands left after processing flags, go interactive
+    if len(os.Args) < 2 {
+        cli.interactiveMode()
+        return
+    }
 
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
