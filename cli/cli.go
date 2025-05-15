@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"bufio"
 )
 
 type CommandLine struct{
@@ -32,7 +33,8 @@ func (cli *CommandLine) printUsage() {
 
 func (cli *CommandLine) validateArgs() {
 	if len(os.Args) < 2 {
-		cli.printUsage()
+		cli.interactiveMode()
+		//cli.printUsage()
 		runtime.Goexit()
 	}
 }
@@ -192,6 +194,68 @@ func (cli *CommandLine) addFunds(address string, amount int) {
     fmt.Printf("Added %d coins to %s\n", amount, address)
 }
 
+func (cli *CommandLine) printMenu() {
+    fmt.Println("\n=== Blockchain CLI Menu ===")
+    fmt.Println("1. Create Wallet")
+    fmt.Println("2. List Addresses")
+    fmt.Println("3. Get Balance")
+    fmt.Println("4. Send Coins")
+    fmt.Println("5. Print Chain")
+    fmt.Println("6. Add Funds")
+    fmt.Println("7. Validate Chain")
+    fmt.Println("8. Exit")
+    fmt.Print("Select option (1-8): ")
+}
+
+func (cli *CommandLine) interactiveMode() {
+    scanner := bufio.NewScanner(os.Stdin)
+    
+    for {
+        cli.printMenu()
+        scanner.Scan()
+        choice := scanner.Text()
+        
+        switch choice {
+        case "1":
+            cli.createWallet()
+        case "2":
+            cli.listAddresses()
+        case "3":
+            fmt.Print("Enter address: ")
+            scanner.Scan()
+            address := scanner.Text()
+            cli.getBalance(address)
+        case "4":
+            fmt.Print("From: ")
+            scanner.Scan()
+            from := scanner.Text()
+            fmt.Print("To: ")
+            scanner.Scan()
+            to := scanner.Text()
+            fmt.Print("Amount: ")
+            scanner.Scan()
+            amount, _ := strconv.Atoi(scanner.Text())
+            cli.send(from, to, amount)
+        case "5":
+            cli.printChain()
+        case "6":
+            fmt.Print("Address to fund: ")
+            scanner.Scan()
+            address := scanner.Text()
+            fmt.Print("Amount: ")
+            scanner.Scan()
+            amount, _ := strconv.Atoi(scanner.Text())
+            cli.addFunds(address, amount)
+        case "7":
+            cli.validateChain()
+        case "8":
+            os.Exit(0)
+        default:
+            fmt.Println("Invalid option")
+        }
+    }
+}
+
 func (cli *CommandLine) Run() {
     // Handle global flags
     if len(os.Args) > 1 {
@@ -305,7 +369,8 @@ func (cli *CommandLine) Run() {
 		cli.addFunds(*addFundsAddress, *addFundsAmount)
 	
 	default:
-		cli.printUsage()
+		//cli.printUsage()
+		cli.interactiveMode()
 		runtime.Goexit()
 	}
 
