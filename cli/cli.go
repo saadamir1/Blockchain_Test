@@ -16,6 +16,7 @@ type CommandLine struct{
 	Consistency string
     NodeID      string
     TrustScore  float64
+	NodeManagementMode bool
 }
 
 func (cli *CommandLine) printUsage() {
@@ -147,14 +148,16 @@ func (cli *CommandLine) setConsistency(level string) {
     switch level {
     case "strong":
         chain.ConsistencyMgr.SetConsistency(blockchain.StrongConsistency)
+    case "causal":
+        chain.ConsistencyMgr.SetConsistency(blockchain.CausalConsistency)
     case "eventual":
         chain.ConsistencyMgr.SetConsistency(blockchain.EventualConsistency)
     default:
-        log.Panic("Invalid consistency level")
+        fmt.Println("Invalid consistency level")
+        return
     }
     fmt.Println("Consistency level set to:", level)
 }
-
 func Handle(err error) {
     if err != nil {
         log.Panic(err)
@@ -186,7 +189,9 @@ func (cli *CommandLine) addFunds(address string, amount int) {
     fmt.Printf("Added %d coins to %s\n", amount, address)
 }
 
-/////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
 
 // Helper function to select address from list
 func (cli *CommandLine) selectAddress(scanner *bufio.Scanner, prompt string) (string, bool) {
@@ -319,19 +324,100 @@ func (cli *CommandLine) waitForEnter(scanner *bufio.Scanner, message string) {
     fmt.Print(message)
     scanner.Scan()
 }
+func (cli *CommandLine) setConsistencyInteractive(scanner *bufio.Scanner) {
+    fmt.Println("\nSelect consistency level:")
+    fmt.Println("1. Strong (slow, most secure)")
+    fmt.Println("2. Causal (balanced)")
+    fmt.Println("3. Eventual (fast, less secure)")
+    fmt.Print("Your choice: ")
+    
+    scanner.Scan()
+    var level string
+    switch scanner.Text() {
+    case "1":
+        level = "strong"
+    case "2":
+        level = "causal"
+    case "3":
+        level = "eventual"
+    default:
+        fmt.Println("Invalid selection")
+        return
+    }
+    
+    chain := blockchain.ContinueBlockChain("")
+    defer chain.Database.Close()
+    
+    switch level {
+    case "strong":
+        chain.ConsistencyMgr.SetConsistency(blockchain.StrongConsistency)
+    case "causal":
+        chain.ConsistencyMgr.SetConsistency(blockchain.CausalConsistency)
+    case "eventual":
+        chain.ConsistencyMgr.SetConsistency(blockchain.EventualConsistency)
+    }
+    fmt.Printf("Successfully set to %s consistency\n", level)
+}
+
+func (cli *CommandLine) setTrustInteractive(scanner *bufio.Scanner) {
+    fmt.Print("\nEnter Node ID: ")
+    scanner.Scan()
+    nodeID := scanner.Text()
+    
+    fmt.Print("Enter Trust Score (0.0-1.0): ")
+    scanner.Scan()
+    score, err := strconv.ParseFloat(scanner.Text(), 64)
+    
+    if err != nil || score < 0 || score > 1 {
+        fmt.Println("Invalid score (must be 0.0-1.0)")
+        return
+    }
+    
+    cli.setTrust(nodeID, score)
+    fmt.Printf("Set trust score for %s to %.2f\n", nodeID, score)
+}
+
+func (cli *CommandLine) viewNetworkStatus() {
+    chain := blockchain.ContinueBlockChain("")
+    defer chain.Database.Close()
+    
+    fmt.Println("\n=== Network Status ===")
+    fmt.Printf("Current Consistency: %v\n", chain.ConsistencyMgr.GetConsistencyLevel(chain.GetNodeID()))
+    
+    netStats := chain.GetNetworkStats()
+    if netStats != nil {
+        fmt.Printf("Partition Probability: %.2f%%\n", netStats.PredictPartitionProbability()*100)
+    } else {
+        fmt.Println("Network stats unavailable")
+    }
+    
+    fmt.Println("\nTrust Scores:")
+    for node, score := range chain.GetTrustScores() {
+        fmt.Printf("- %s: %.2f\n", node, score)
+    }
+}
 
 func (cli *CommandLine) printMenu() {
-    fmt.Println("\n=== Blockchain CLI Menu ===")
-    fmt.Println("1. Create Wallet")
-    fmt.Println("2. List Addresses")
-    fmt.Println("3. Initialize Blockchain")
-    fmt.Println("4. Get Balance") 
-    fmt.Println("5. Send Coins")
-    fmt.Println("6. Print Chain")
-    fmt.Println("7. Add Funds")
-    fmt.Println("8. Validate Chain")
-    fmt.Println("9. Exit")
-    fmt.Print("Select option (1-9): ")
+	if cli.NodeManagementMode {
+        fmt.Println("\n=== Node Management ===")
+        fmt.Println("1. Set Consistency Level")
+        fmt.Println("2. Set Node Trust Score")
+        fmt.Println("3. View Network Status")
+        fmt.Println("4. Back to Main Menu")
+    } else {
+		fmt.Println("\n=== Blockchain CLI Menu ===")
+		fmt.Println("1. Create Wallet")
+		fmt.Println("2. List Addresses")
+		fmt.Println("3. Initialize Blockchain")
+		fmt.Println("4. Get Balance") 
+		fmt.Println("5. Send Coins")
+		fmt.Println("6. Print Chain")
+		fmt.Println("7. Add Funds")
+		fmt.Println("8. Validate Chain")
+		fmt.Println("9. Node Management")
+		fmt.Println("0. Exit")
+	}
+	fmt.Print("Select option: ")
 }
 
 func (cli *CommandLine) interactiveMode() {
@@ -341,29 +427,47 @@ func (cli *CommandLine) interactiveMode() {
         cli.printMenu()
         scanner.Scan()
         choice := scanner.Text()
+		 if cli.NodeManagementMode {
+            switch choice {
+            case "1":
+                cli.setConsistencyInteractive(scanner)
+            case "2":
+                cli.setTrustInteractive(scanner)
+            case "3":
+                cli.viewNetworkStatus()
+            case "4":
+                cli.NodeManagementMode = false
+            default:
+                fmt.Println("Invalid option")
+            }
+        } else {
         
-        switch choice {
-        case "1":
-            cli.createWallet()
-        case "2":
-            cli.listAddresses()
-        case "3":
-            cli.initializeBlockchainInteractive(scanner)
-        case "4":
-            cli.getBalanceInteractive(scanner)
-        case "5":
-            cli.sendInteractive(scanner)
-        case "6":
-            cli.printChain()
-        case "7":
-            cli.addFundsInteractive(scanner)
-        case "8":
-            cli.validateChain()
-        case "9":
-            os.Exit(0)
-        default:
-            fmt.Println("Invalid option")
-        }
+			switch choice {
+			case "1":
+				cli.createWallet()
+			case "2":
+				cli.listAddresses()
+			case "3":
+				cli.initializeBlockchainInteractive(scanner)
+			case "4":
+				cli.getBalanceInteractive(scanner)
+			case "5":
+				cli.sendInteractive(scanner)
+			case "6":
+				cli.printChain()
+			case "7":
+				cli.addFundsInteractive(scanner)
+			case "8":
+				cli.validateChain()
+			case "9":
+                cli.NodeManagementMode = true
+            case "0":
+                os.Exit(0)
+
+			default:
+				fmt.Println("Invalid option")
+			}
+		}
         cli.waitForEnter(scanner, "Press Enter to continue...")
     }
 }

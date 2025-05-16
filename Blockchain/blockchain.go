@@ -80,6 +80,28 @@ func InitBlockChain(address string) *BlockChain {
 	return &blockchain
 }
 
+// GetNodeID returns the node's identifier
+func (chain *BlockChain) GetNodeID() string {
+    return chain.nodeID
+}
+
+// GetNetworkStats returns the network statistics
+func (chain *BlockChain) GetNetworkStats() *NetworkStats {
+    return chain.ConsistencyMgr.NetworkStats
+}
+
+// GetTrustScores returns a copy of the trust scores map
+func (chain *BlockChain) GetTrustScores() map[string]float64 {
+    chain.mutex.RLock()
+    defer chain.mutex.RUnlock()
+    
+    scores := make(map[string]float64)
+    for k, v := range chain.trustScores {
+        scores[k] = v
+    }
+    return scores
+}
+
 //rebuildAMF rebuilds the Adaptive Merkle Forest from existing blocks
 func (chain *BlockChain) rebuildAMF() {
     iter := chain.Iterator()
