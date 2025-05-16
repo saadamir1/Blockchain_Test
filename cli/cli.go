@@ -186,17 +186,152 @@ func (cli *CommandLine) addFunds(address string, amount int) {
     fmt.Printf("Added %d coins to %s\n", amount, address)
 }
 
+/////////////////////////////////////////////////
+
+// Helper function to select address from list
+func (cli *CommandLine) selectAddress(scanner *bufio.Scanner, prompt string) (string, bool) {
+    addresses := cli.getAllAddresses()
+    if len(addresses) == 0 {
+        fmt.Println("No wallets found. Please create a wallet first.")
+        return "", false
+    }
+
+    fmt.Println(prompt)
+    for i, addr := range addresses {
+        fmt.Printf("%d. %s\n", i+1, addr)
+    }
+    fmt.Printf("Choose address (1-%d or 0 to cancel): ", len(addresses))
+    
+    scanner.Scan()
+    idx, err := strconv.Atoi(scanner.Text())
+    if err != nil || idx < 0 || idx > len(addresses) {
+        fmt.Println("Invalid selection")
+        return "", false
+    }
+    if idx == 0 {
+        return "", false // Cancelled
+    }
+    return addresses[idx-1], true
+}
+
+// Interactive version of getBalance
+func (cli *CommandLine) getBalanceInteractive(scanner *bufio.Scanner) {
+    address, ok := cli.selectAddress(scanner, "Select address to check balance:")
+    if ok {
+        cli.getBalance(address)
+    }
+}
+
+// Interactive version of send
+func (cli *CommandLine) sendInteractive(scanner *bufio.Scanner) {
+    fmt.Println("\n=== Send Coins ===")
+    from, ok1 := cli.selectAddress(scanner, "Select sender address:")
+    if !ok1 {
+        return
+    }
+    
+    to, ok2 := cli.selectAddress(scanner, "Select recipient address:")
+    if !ok2 {
+        return
+    }
+
+    fmt.Print("Amount to send: ")
+    scanner.Scan()
+    amount, err := strconv.Atoi(scanner.Text())
+    if err != nil {
+        fmt.Println("Invalid amount")
+        return
+    }
+
+    cli.send(from, to, amount)
+}
+
+// Interactive version of addFunds
+func (cli *CommandLine) addFundsInteractive(scanner *bufio.Scanner) {
+    address, ok := cli.selectAddress(scanner, "Select address to fund:")
+    if !ok {
+        return
+    }
+
+    fmt.Print("Amount to add: ")
+    scanner.Scan()
+    amount, err := strconv.Atoi(scanner.Text())
+    if err != nil {
+        fmt.Println("Invalid amount")
+        return
+    }
+
+    cli.addFunds(address, amount)
+}
+
+func (cli *CommandLine) initializeBlockchainInteractive(scanner *bufio.Scanner) {
+    fmt.Println("\n=== Initialize Blockchain ===")
+    
+    addresses := cli.getAllAddresses()
+    if len(addresses) == 0 {
+        fmt.Println("No wallets found. Please create a wallet first (option 1).")
+        return
+    }
+
+    fmt.Println("Select address for genesis block:")
+    for i, addr := range addresses {
+        fmt.Printf("%d. %s\n", i+1, addr)
+    }
+    
+    fmt.Printf("Choose address (1-%d or 0 to cancel): ", len(addresses))
+    scanner.Scan()
+    idx, err := strconv.Atoi(scanner.Text())
+    
+    if err != nil || idx < 0 || idx > len(addresses) {
+        fmt.Println("Invalid selection")
+        return
+    }
+    
+    if idx == 0 {
+        fmt.Println("Cancelled")
+        return
+    }
+
+    address := addresses[idx-1]
+    
+    if blockchain.DBExists() {
+        fmt.Println("Blockchain already exists. Use option 6 to view it.")
+        return
+    }
+
+    fmt.Printf("\nCreating blockchain with address %s...\n", address)
+    chain := blockchain.InitBlockChain(address)
+    chain.Database.Close()
+    fmt.Println("Blockchain created successfully with 100 initial coins!")
+}
+
+// getAllAddresses helper function
+func (cli *CommandLine) getAllAddresses() []string {
+    wallets, err := wallet.CreateWallets()
+    if err != nil {
+        return []string{}
+    }
+    return wallets.GetAllAddresses()
+}
+
+// waitForEnter helper function
+func (cli *CommandLine) waitForEnter(scanner *bufio.Scanner, message string) {
+    fmt.Print(message)
+    scanner.Scan()
+}
+
 func (cli *CommandLine) printMenu() {
     fmt.Println("\n=== Blockchain CLI Menu ===")
     fmt.Println("1. Create Wallet")
     fmt.Println("2. List Addresses")
-    fmt.Println("3. Get Balance")
-    fmt.Println("4. Send Coins")
-    fmt.Println("5. Print Chain")
-    fmt.Println("6. Add Funds")
-    fmt.Println("7. Validate Chain")
-    fmt.Println("8. Exit")
-    fmt.Print("Select option (1-8): ")
+    fmt.Println("3. Initialize Blockchain")
+    fmt.Println("4. Get Balance") 
+    fmt.Println("5. Send Coins")
+    fmt.Println("6. Print Chain")
+    fmt.Println("7. Add Funds")
+    fmt.Println("8. Validate Chain")
+    fmt.Println("9. Exit")
+    fmt.Print("Select option (1-9): ")
 }
 
 func (cli *CommandLine) interactiveMode() {
@@ -213,42 +348,28 @@ func (cli *CommandLine) interactiveMode() {
         case "2":
             cli.listAddresses()
         case "3":
-            fmt.Print("Enter address: ")
-            scanner.Scan()
-            address := scanner.Text()
-            cli.getBalance(address)
+            cli.initializeBlockchainInteractive(scanner)
         case "4":
-            fmt.Print("From: ")
-            scanner.Scan()
-            from := scanner.Text()
-            fmt.Print("To: ")
-            scanner.Scan()
-            to := scanner.Text()
-            fmt.Print("Amount: ")
-            scanner.Scan()
-            amount, _ := strconv.Atoi(scanner.Text())
-            cli.send(from, to, amount)
+            cli.getBalanceInteractive(scanner)
         case "5":
-            cli.printChain()
+            cli.sendInteractive(scanner)
         case "6":
-            fmt.Print("Address to fund: ")
-            scanner.Scan()
-            address := scanner.Text()
-            fmt.Print("Amount: ")
-            scanner.Scan()
-            amount, _ := strconv.Atoi(scanner.Text())
-            cli.addFunds(address, amount)
+            cli.printChain()
         case "7":
-            cli.validateChain()
+            cli.addFundsInteractive(scanner)
         case "8":
+            cli.validateChain()
+        case "9":
             os.Exit(0)
         default:
             fmt.Println("Invalid option")
         }
+        cli.waitForEnter(scanner, "Press Enter to continue...")
     }
 }
 
 func (cli *CommandLine) Run() {
+	
     // Handle global flags
     if len(os.Args) > 1 {
         for i, arg := range os.Args {
