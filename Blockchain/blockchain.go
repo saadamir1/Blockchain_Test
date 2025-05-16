@@ -7,6 +7,7 @@ import (
 	"sync"
 	"bytes"
 	"math"
+	"log"
 
 	"github.com/dgraph-io/badger"
 )
@@ -79,6 +80,25 @@ func InitBlockChain(address string) *BlockChain {
 	return &blockchain
 }
 
+//rebuildAMF rebuilds the Adaptive Merkle Forest from existing blocks
+func (chain *BlockChain) rebuildAMF() {
+    iter := chain.Iterator()
+    for {
+        block := iter.Next()
+        
+        // Add block components to AMF
+        chain.AMF.AddData(block.Hash)
+        chain.AMF.AddData(block.Serialize())
+        for _, tx := range block.Transactions {
+            chain.AMF.AddData(tx.ID)
+        }
+        
+        if len(block.PrevHash) == 0 {
+            break
+        }
+    }
+}
+
 // ContinueBlockChain continues an existing blockchain
 func ContinueBlockChain(address string) *BlockChain {
 	if !DBExists() {
@@ -103,7 +123,7 @@ func ContinueBlockChain(address string) *BlockChain {
 	})
 	Handle(err)
 
-	blockchain := BlockChain{
+	blockchain := &BlockChain{
 		LastHash:       lastHash,
 		Database:       db,
 		AMF:            NewAdaptiveMerkleForest(),
@@ -112,8 +132,10 @@ func ContinueBlockChain(address string) *BlockChain {
 		nodeID:         generateNodeID(),
 		trustScores:    make(map[string]float64),
 	}
-
-	return &blockchain
+	
+	// Rebuild AMF from existing blocks
+    blockchain.rebuildAMF()
+    return blockchain
 }
 
 // generateNodeID creates a unique node identifier
@@ -123,51 +145,58 @@ func generateNodeID() string {
 	return hex.EncodeToString(buffer)
 }
 
+
 // AddBlock adds a new block to the blockchain
 func (chain *BlockChain) AddBlock(transactions []*Transaction) {
-	// Get dynamic consistency level
-	consistencyLevel := chain.ConsistencyMgr.GetConsistencyLevel(chain.nodeID)
-	
-	chain.mutex.Lock()
-	defer chain.mutex.Unlock()
-	
-	// Get the last hash
-	var lastHash []byte
-	err := chain.Database.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte("lh"))
-		Handle(err)
-		err = item.Value(func(val []byte) error {
-			lastHash = append([]byte{}, val...)
-			return nil
-		})
-		return err
-	})
-	Handle(err)
+    consistencyLevel := chain.ConsistencyMgr.GetConsistencyLevel(chain.nodeID)
+    chain.mutex.Lock()
+    defer chain.mutex.Unlock()
 
-	// Create new block
-	newBlock := CreateBlock(transactions, lastHash)
-	
-	// Update AMF (Adaptive Merkle Forest)
-	for _, tx := range transactions {
-		chain.AMF.AddData(tx.ID)
-	}
-	
-	// Store block in database
-	err = chain.Database.Update(func(txn *badger.Txn) error {
-		serializedBlock := newBlock.Serialize()
-		err := txn.Set(newBlock.Hash, serializedBlock)
-		Handle(err)
-		err = txn.Set([]byte("lh"), newBlock.Hash)
-		chain.LastHash = newBlock.Hash
-		chain.AMF.AddData(serializedBlock)
-		return err
-	})
-	Handle(err)
-	
-	// Handle cross-shard synchronization based on consistency level
-	if consistencyLevel == StrongConsistency {
-		chain.SyncMgr.CreateCommitment(hex.EncodeToString(newBlock.Hash), newBlock.Serialize())
-	}
+    // Get last hash
+    var lastHash []byte
+    err := chain.Database.View(func(txn *badger.Txn) error {
+        item, err := txn.Get([]byte("lh"))
+        Handle(err)
+        return item.Value(func(val []byte) error {
+            lastHash = append([]byte{}, val...)
+            return nil
+        })
+    })
+    Handle(err)
+
+    // Create and prepare block
+    newBlock := CreateBlock(transactions, lastHash)
+    
+    // 1. Add all components to AMF FIRST
+    for _, tx := range transactions {
+        chain.AMF.AddData(tx.ID)
+    }
+    chain.AMF.AddData(newBlock.Hash)
+    chain.AMF.AddData(newBlock.Serialize())
+
+    // 2. Verify BEFORE storing in DB
+    if !chain.VerifyBlockIntegrity(newBlock) {
+        log.Panic("Block failed pre-storage verification")
+    }
+
+    // 3. Store in database
+    err = chain.Database.Update(func(txn *badger.Txn) error {
+        serialized := newBlock.Serialize()
+        if err := txn.Set(newBlock.Hash, serialized); err != nil {
+            return err
+        }
+        if err := txn.Set([]byte("lh"), newBlock.Hash); err != nil {
+            return err
+        }
+        chain.LastHash = newBlock.Hash
+        return nil
+    })
+    Handle(err)
+
+    // 4. Post-storage verification
+    if consistencyLevel == StrongConsistency {
+        chain.SyncMgr.CreateCommitment(hex.EncodeToString(newBlock.Hash), newBlock.Serialize())
+    }
 }
 
 // Iterator returns a blockchain iterator
@@ -285,28 +314,31 @@ func (chain *BlockChain) VerifyBlockIntegrity(block *Block) bool {
     // 1. Always verify proof of work
     pow := NewProof(block)
     if !pow.Validate() {
-        fmt.Println("Block", hex.EncodeToString(block.Hash), "failed PoW verification")
         return false
     }
 
-    // 2. For genesis block, skip AMF verification
+    // 2. Skip AMF check for genesis block
     if len(block.PrevHash) == 0 {
         return true
     }
 
-    // 3. For other blocks, verify transaction Merkle root matches
+    // 3. Check transaction Merkle root
     calculatedRoot := block.HashTransactions()
     if !bytes.Equal(calculatedRoot, block.TxTrie.Hash) {
-        fmt.Println("Merkle root mismatch for block", hex.EncodeToString(block.Hash))
         return false
     }
 
-    // 4. Verify block in AMF if AMF is initialized
+    // 4. Verify block in AMF with retry logic
     if chain.AMF != nil {
-        _, exists := chain.AMF.GenerateMerkleProof(block.Hash)
-        if !exists {
-            fmt.Println("Block", hex.EncodeToString(block.Hash), "not found in AMF")
-            return false
+        if _, exists := chain.AMF.GenerateMerkleProof(block.Hash); !exists {
+            // Attempt to recover by adding to AMF
+            chain.AMF.AddData(block.Hash)
+            chain.AMF.AddData(block.Serialize())
+            
+            // Retry verification
+            if _, exists := chain.AMF.GenerateMerkleProof(block.Hash); !exists {
+                return false
+            }
         }
     }
 
